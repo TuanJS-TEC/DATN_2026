@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tin Kinh Tế</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+<link rel="stylesheet" href="news.css">
+</head>
+<body>
+<div id="app" v-cloak>
+  <p-progressbar class="readbar" :value="progress" :show-value="false" aria-label="Tiến độ đọc"></p-progressbar>
+  <site-header :active="K" compact></site-header>
+
+  <main class="wrap">
+    <article class="art" :style="{ '--fs': size + 'px' }">
+      <a v-if="K" class="kicker" :href="'section.html?cat=' + K">{{ catName(K) }}</a>
+
+      <template v-if="art">
+        <h1>{{ art.title }}</h1>
+        <p v-if="art.sapo" class="sapo">{{ art.sapo }}</p>
+        <div class="byline">
+          <span v-if="art.author">Bởi <b>{{ art.author }}</b></span>
+          <span>{{ ago(art.date) }}</span>
+          <span class="tools">
+            <p-selectbutton v-model="size" :options="sizes" option-label="label" option-value="px" :allow-empty="false"
+                            size="small" aria-label="Cỡ chữ"></p-selectbutton>
+            <p-button icon="pi pi-link" text rounded size="small" v-tooltip.top="'Sao chép liên kết'" aria-label="Sao chép liên kết" @click="copy"></p-button>
+            <p-button as="a" :href="art.source" target="_blank" rel="noopener" icon="pi pi-external-link" text rounded size="small"
+                      v-tooltip.top="'Đọc trên ' + source" :aria-label="'Đọc trên ' + source"></p-button>
+          </span>
+        </div>
+        <!-- content was stripped of script/iframe/on* handlers by the server (internal/news/article.go sanitize). -->
+        <div class="content" v-html="art.content"></div>
+      </template>
+
+      <p-message v-else-if="failed" severity="error" class="msg">
+        Không đọc được bài ({{ failed }}).
+        <a v-if="fallback" :href="fallback" target="_blank" rel="noopener">Mở trên {{ source }} ↗</a>
+      </p-message>
+
+      <template v-else>
+        <p-skeleton height="2.6rem" class="mt"></p-skeleton><p-skeleton height="2.6rem" width="70%" class="mt"></p-skeleton>
+        <p-skeleton height="4rem" class="mt"></p-skeleton>
+        <p-skeleton v-for="i in 6" :key="i" height="1.2rem" class="mt" :width="i % 3 ? '100%' : '60%'"></p-skeleton>
+      </template>
+    </article>
+
+    <section v-if="more.length" class="sec more">
+      <h2 class="label"><a :href="'section.html?cat=' + K">Thêm tin {{ catName(K) }}</a></h2>
+      <div class="row3 cols auto">
+        <story-card v-for="a in more" :key="a.url" :a="a" :cat="K" kind="small" img :sapo="false"></story-card>
+      </div>
+    </section>
+  </main>
+
+  <site-footer></site-footer>
+  <p-toast position="bottom-center"></p-toast>
+</div>
+
+<script src="https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/primevue@4.5.5/umd/primevue.min.js"></script>
+<script src="https://unpkg.com/@primeuix/themes@1.2.5/umd/aura.js"></script>
+<script src="ui.js"></script>
+<script>
+createPage({
+  setup() {
+    const P = qs('p');
+    const K = validCat(qs('cat'));
+    const source = P.startsWith('/') ? 'CafeF' : 'VnExpress';
+    const fallback = P.startsWith('/') ? 'https://cafef.vn' + P : P.startsWith('https://vnexpress.net/') ? P : '';
+    const art = ref(null);
+    const failed = ref('');
+    const more = ref([]);
+    const progress = ref(0);
+    const toast = PrimeVue.useToast();
+
+    // Reader's text size, remembered per browser.
+    const sizes = [{ label: 'A−', px: 17 }, { label: 'A', px: 20 }, { label: 'A+', px: 23 }];
+    let saved = 20;
+    try { saved = +localStorage.getItem('fs') || 20; } catch (e) {}
+    const size = ref(saved);
+    Vue.watch(size, (v) => { try { localStorage.setItem('fs', v); } catch (e) {} });
+
+    const copy = async () => {
+      try {
+        await navigator.clipboard.writeText(location.href);
+        toast.add({ severity: 'contrast', summary: 'Đã sao chép liên kết', life: 2000 });
+      } catch (e) {
+        toast.add({ severity: 'warn', summary: 'Không sao chép được', detail: 'Hãy chép từ thanh địa chỉ.', life: 3000 });
+      }
+    };
+
+    const onScroll = () => {
+      const h = document.documentElement;
+      const max = h.scrollHeight - h.clientHeight;
+      progress.value = max > 0 ? Math.min(100, Math.round((h.scrollTop / max) * 100)) : 0;
+    };
+
+    onMounted(async () => {
+      window.addEventListener('scroll', onScroll, { passive: true });
+      try {
+        art.value = await getJSON('/api/article?p=' + encodeURIComponent(P));
+        document.title = art.value.title + ' – ' + SITE;
+      } catch (e) {
+        failed.value = e.message;
+      }
+      if (!K) return;
+      const list = await getNews(K).catch(() => []);
+      more.value = list.filter((a) => a.url !== P && a.img).slice(0, 4);
+    });
+    onUnmounted(() => window.removeEventListener('scroll', onScroll));
+
+    return { K, art, failed, more, progress, sizes, size, copy, source, fallback, ago, catName };
+  },
+});
+</script>
+</body>
+</html>

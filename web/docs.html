@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Báo cáo tài chính – Tin Kinh Tế</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+<link rel="stylesheet" href="news.css">
+</head>
+<body>
+<div id="app" v-cloak>
+  <site-header></site-header>
+
+  <main class="wrap">
+    <div class="sechead" ref="head">
+      <h1>{{ typeName }}</h1>
+      <p-tag v-if="data" :value="data.total.toLocaleString('vi-VN') + ' tài liệu'" severity="secondary" rounded></p-tag>
+      <p-iconfield class="find">
+        <p-inputicon class="pi pi-search"></p-inputicon>
+        <!-- Vietstock matches exact tickers only, so search fires at 3 characters, not per keystroke. -->
+        <p-inputtext v-model="symInput" placeholder="Lọc theo mã CK (vd: HPG)" aria-label="Mã chứng khoán"
+                     maxlength="3" fluid size="small" @keyup.enter="applySym"></p-inputtext>
+        <p-inputicon v-if="symInput" class="pi pi-times clear" role="button" aria-label="Xoá mã" @click="symInput = ''"></p-inputicon>
+      </p-iconfield>
+    </div>
+
+    <div class="docfilters">
+      <p-selectbutton v-model="type" :options="TYPES" option-label="1" option-value="0" :allow-empty="false"
+                      size="small" aria-label="Loại tài liệu" @change="onType"></p-selectbutton>
+      <div class="row">
+        <!-- label + buttons wrap as one unit, so "Sàn" never ends a line alone -->
+        <span class="grp"><span class="dim">Kỳ</span>
+          <p-selectbutton v-if="data" v-model="termKey" :options="data.terms" :option-label="termLabel" :option-value="termValue"
+                          :allow-empty="false" size="small" aria-label="Kỳ báo cáo" @change="reset"></p-selectbutton></span>
+        <span class="grp"><span class="dim">Sàn</span>
+          <p-selectbutton v-model="ex" :options="EXS" option-label="1" option-value="0" :allow-empty="false"
+                          size="small" aria-label="Sàn giao dịch" @change="reset"></p-selectbutton></span>
+      </div>
+    </div>
+
+    <p-message v-if="failed" severity="error" class="msg">Không tải được tài liệu: {{ failed }}
+      <a href="#" @click.prevent="load">Thử lại</a></p-message>
+
+    <div v-else-if="!data" class="docs">
+      <div v-for="i in 8" :key="i" class="doc"><p-skeleton height="2.4rem"></p-skeleton><p-skeleton height="2.4rem"></p-skeleton><span></span></div>
+    </div>
+
+    <template v-else>
+      <p-progressbar v-if="loading" mode="indeterminate" class="docbusy"></p-progressbar>
+      <div class="docs" :class="{ busy: loading }">
+        <div v-for="d in data.items" :key="d.url" class="doc">
+          <div class="meta">{{ ago(d.time) }}<br><span class="ex">{{ EXNAME[d.exchange] || d.exchange }}</span></div>
+          <div>
+            <div class="who">
+              <a v-if="d.sym" class="tick" :href="'section.html?sym=' + d.sym" v-tooltip.top="'Tin tức về ' + d.sym">{{ d.sym }}</a>
+              <span class="co">{{ d.company }}</span>
+            </div>
+            <a class="title" :href="d.url" target="_blank" rel="noopener">{{ d.title }}</a>
+          </div>
+          <p-button as="a" :href="d.url" target="_blank" rel="noopener" size="small" outlined
+                    :icon="d.ext === 'pdf' ? 'pi pi-file-pdf' : 'pi pi-download'" :label="d.ext.toUpperCase()"
+                    :aria-label="'Tải ' + d.title"></p-button>
+        </div>
+        <p-message v-if="!data.items.length" severity="secondary" variant="simple" class="msg">
+          {{ sym ? 'Chưa có ' + typeName.toLowerCase() + ' của ' + sym + ' trong kỳ này.' : 'Không có tài liệu nào trong kỳ này.' }}
+        </p-message>
+      </div>
+
+      <p-paginator v-if="data.total > data.per" class="pager" :rows="data.per" :total-records="data.total"
+                   :first="(data.page - 1) * data.per" :page-link-size="5"
+                   template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+                   @page="go($event.page + 1)"></p-paginator>
+      <p class="dim src">Nguồn: <a href="https://finance.vietstock.vn/tai-lieu/bao-cao-tai-chinh.htm" target="_blank" rel="noopener">Vietstock Finance</a> · Tệp mở trực tiếp từ máy chủ Vietstock.</p>
+    </template>
+  </main>
+
+  <site-footer></site-footer>
+</div>
+
+<script src="https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/primevue@4.5.5/umd/primevue.min.js"></script>
+<script src="https://unpkg.com/@primeuix/themes@1.2.5/umd/aura.js"></script>
+<script src="ui.js"></script>
+<script>
+// Same keys as internal/docs.types.
+const TYPES = [
+  ['BCTC', 'Báo cáo tài chính'], ['GIAI-TRINH', 'Giải trình KQKD'], ['QUAN-TRI', 'Báo cáo quản trị'],
+  ['THUONG-NIEN', 'Báo cáo thường niên'], ['NGHI-QUYET', 'Nghị quyết ĐHĐCĐ'], ['DHCD', 'Tài liệu ĐHĐCĐ'],
+];
+const EXS = [['', 'Tất cả'], ['HOSE', 'HOSE'], ['HNX', 'HNX'], ['UPCOM', 'UPCoM'], ['OTC', 'OTC']];
+const EXNAME = { HOSE: 'HOSE', HNX: 'HNX', UPCOM: 'UPCoM', OTC: 'OTC', KHAC: 'Khác' };
+
+createPage({
+  setup() {
+    const url = new URL(location);
+    const type = ref(TYPES.some((t) => t[0] === qs('type')) ? qs('type') : 'BCTC');
+    const ex = ref(EXS.some((e) => e[0] === qs('ex')) ? qs('ex') : '');
+    const sym = ref(qs('sym').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3));
+    const symInput = ref(sym.value);
+    // "" lets the server pick the newest period that actually has files.
+    const termKey = ref(qs('year') && qs('term') ? qs('year') + '-' + qs('term') : '');
+    const page = ref(Math.max(1, parseInt(qs('page')) || 1));
+
+    const data = ref(null);
+    const loading = ref(false);
+    const failed = ref('');
+    const head = ref(null);
+
+    const typeName = computed(() => TYPES.find((t) => t[0] === type.value)[1]);
+    const termValue = (t) => t.year + '-' + t.id;
+    // "Năm" alone is ambiguous next to other years; quarters read fine as "Quý 2/2026".
+    const termLabel = (t) => t.name + ' ' + t.year;
+
+    let seq = 0;
+    const load = async () => {
+      const my = ++seq; // a slow old response must not overwrite a newer filter
+      loading.value = true;
+      failed.value = '';
+      const p = new URLSearchParams({ type: type.value, page: page.value });
+      if (ex.value) p.set('ex', ex.value);
+      if (sym.value) p.set('sym', sym.value);
+      if (termKey.value) { const [y, t] = termKey.value.split('-'); p.set('year', y); p.set('term', t); }
+      try {
+        const j = await getJSON('/api/docs?' + p);
+        if (my !== seq) return;
+        data.value = j;
+        page.value = j.page;
+        termKey.value = termValue(j.term);
+        // Keep filters in the URL so a shared or reloaded link shows the same list.
+        const u = new URL(location.pathname, location.origin);
+        u.search = p;
+        u.searchParams.set('year', j.term.year);
+        u.searchParams.set('term', j.term.id);
+        if (j.page === 1) u.searchParams.delete('page');
+        history.replaceState(null, '', u);
+        document.title = typeName.value + (sym.value ? ' ' + sym.value : '') + ' – ' + SITE;
+      } catch (e) {
+        if (my === seq) failed.value = e.message;
+      } finally {
+        if (my === seq) loading.value = false;
+      }
+    };
+
+    // Filters react to @change (user clicks only), not watchers: load() itself
+    // writes termKey back from the server's pick, which must not trigger a reload.
+    const reset = () => { page.value = 1; load(); };
+    // Periods differ per document type (quarters vs years): let the server re-pick.
+    const onType = () => { termKey.value = ''; reset(); };
+
+    const applySym = () => {
+      const s = symInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (s.length !== 3 && s !== '') return;
+      if (s === sym.value) return;
+      sym.value = s;
+      termKey.value = '';
+      reset();
+    };
+    Vue.watch(symInput, (v) => { if (v.length === 3 || v === '') applySym(); });
+
+    const go = (n) => { page.value = n; load(); head.value.scrollIntoView({ behavior: 'smooth' }); };
+
+    onMounted(load);
+
+    return { TYPES, EXS, EXNAME, type, ex, sym, symInput, termKey, page, data, loading, failed, head,
+             typeName, termValue, termLabel, load, reset, onType, applySym, go, ago };
+  },
+});
+</script>
+</body>
+</html>

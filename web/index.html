@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tin Kinh Tế – Trang nhất</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+<link rel="stylesheet" href="news.css">
+</head>
+<body>
+<div id="app" v-cloak>
+  <site-header></site-header>
+
+  <main class="wrap">
+    <p-message v-if="failed" severity="error" class="msg">Không tải được tin. Thử tải lại trang sau ít phút.</p-message>
+
+    <!-- skeleton mirrors the real grid so nothing jumps when stories arrive -->
+    <div v-else-if="!page" class="front cols">
+      <div>
+        <div class="pkg">
+          <div class="stack"><div v-for="i in 2" :key="i"><p-skeleton height="1.4rem" class="mb"></p-skeleton><p-skeleton height="1.4rem" width="70%" class="mb"></p-skeleton><p-skeleton height="4rem"></p-skeleton></div></div>
+          <div><p-skeleton height="0" class="ratio"></p-skeleton><p-skeleton height="2rem" class="mt"></p-skeleton></div>
+        </div>
+        <div class="row3"><div v-for="i in 3" :key="i"><p-skeleton height="0" class="ratio"></p-skeleton><p-skeleton height="1.2rem" class="mt"></p-skeleton></div></div>
+      </div>
+      <aside><div class="stack"><div v-for="i in 6" :key="i" class="skthumb"><p-skeleton height="3.2rem"></p-skeleton><p-skeleton size="80px"></p-skeleton></div></div></aside>
+    </div>
+
+    <template v-else>
+      <div class="front cols">
+        <div>
+          <template v-for="(b, i) in page.main" :key="i">
+            <h2 v-if="b.label" class="label"><a :href="'section.html?cat=' + b.cat">{{ b.label }}</a></h2>
+            <div v-if="b.lead" class="pkg cols">
+              <div class="stack"><story-card v-for="a in b.subs" :key="a.url" :a="a" :cat="b.cat"></story-card></div>
+              <story-card :a="b.lead" :cat="b.cat" kind="lead" img></story-card>
+            </div>
+            <div v-else class="row3 cols">
+              <story-card v-for="a in b.row" :key="a.url" :a="a" :cat="b.cat" kind="small" img></story-card>
+            </div>
+          </template>
+        </div>
+        <aside>
+          <h2 class="label">Mới nhất</h2>
+          <div class="stack"><story-card v-for="a in page.latest" :key="a.url" :a="a" kind="thumb small" img :sapo="false"></story-card></div>
+        </aside>
+      </div>
+
+      <section v-for="s in page.sections" :key="s.cat" class="sec">
+        <h2 class="label"><a :href="'section.html?cat=' + s.cat">{{ s.name }}</a></h2>
+        <div class="cols4 cols">
+          <story-card :a="s.lead" :cat="s.cat" img></story-card>
+          <story-card v-for="a in s.rest" :key="a.url" :a="a" :cat="s.cat" kind="small" img :sapo="false"></story-card>
+        </div>
+      </section>
+    </template>
+  </main>
+
+  <site-footer></site-footer>
+  <fresh-news :load="loadFlat" :urls="urls"></fresh-news>
+</div>
+
+<script src="https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/primevue@4.5.5/umd/primevue.min.js"></script>
+<script src="https://unpkg.com/@primeuix/themes@1.2.5/umd/aura.js"></script>
+<script src="ui.js"></script>
+<script>
+createPage({
+  setup() {
+    const page = ref(null);
+    const failed = ref(false);
+    const urls = ref([]);
+    const loadFlat = () => getAllNews().then((l) => l.flat());
+
+    onMounted(async () => {
+      const lists = await getAllNews();
+      if (!lists.some((l) => l.length)) { failed.value = true; return; }
+      urls.value = lists.flat().map((a) => a.url);
+
+      // One article can sit in several categories; show it only once on the front page.
+      const used = new Set();
+      const take = (list, n, needImg) => {
+        const out = [];
+        for (const a of list) {
+          if (out.length === n) break;
+          if (used.has(a.url) || (needImg && !a.img)) continue;
+          used.add(a.url);
+          out.push(a);
+        }
+        return out;
+      };
+      // Lead package: sub-stories left, big photo with its headline + summary right.
+      const pkg = (i, subs, label) => {
+        const [lead] = take(lists[i], 1, true);
+        return { cat: CATS[i][0], label, lead, subs: take(lists[i], subs) };
+      };
+      const last = CATS.length - 1; // Quốc tế closes the main column, like NYT's World block
+
+      const main = [
+        pkg(0, 2),
+        { cat: CATS[0][0], row: take(lists[0], 3, true) },
+        pkg(0, 3),
+        pkg(last, 2, CATS[last][1]),
+      ].filter((b) => b.lead || (b.row && b.row.length));
+
+      // Right rail: newest headlines across every category.
+      const seen = new Set();
+      const latest = lists.flat()
+        .filter((a) => !seen.has(a.url) && seen.add(a.url))
+        .sort((x, y) => new Date(y.time) - new Date(x.time))
+        .slice(0, 9);
+
+      const sections = CATS.slice(1, last).map(([cat, name], j) => {
+        const [lead] = take(lists[j + 1], 1, true);
+        return { cat, name, lead, rest: take(lists[j + 1], 3, true) };
+      }).filter((s) => s.lead);
+
+      page.value = { main, latest, sections };
+    });
+
+    return { page, failed, urls, loadFlat };
+  },
+});
+</script>
+</body>
+</html>

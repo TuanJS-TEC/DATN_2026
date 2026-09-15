@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bảng giá chứng khoán – Tin Kinh Tế</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;700&family=Playfair+Display:wght@700;900&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+<link rel="stylesheet" href="news.css">
+<style>
+  /* Board on the news pages' light palette. Vietnamese board convention stays
+     (trần tím, sàn xanh lam, TC vàng, tăng xanh, giảm đỏ), darkened to read on white;
+     every coloured cell is also a number, so identity is never colour-alone. */
+  :root { --ref: #a86200; --ceil: #8e24aa; --floor: #0277a8; --row: #f7f7f7; --pick: #eaf1f7; }
+  .ref { color: var(--ref); } .ceil { color: var(--ceil); } .fl { color: var(--floor); }
+  .dim { color: var(--muted); }
+
+  .bhead { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 18px; padding-block: 22px 12px; border-bottom: 1px solid var(--ink); }
+  .bhead h1 { font: 700 clamp(28px, 4.6vw, 42px)/1 var(--display); margin: 0; }
+  .live { gap: 6px; font: 500 12px var(--sans); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--up); }
+  .dot.on { animation: pulse 1s ease-out; }
+  @keyframes pulse { from { box-shadow: 0 0 0 0 rgba(10,122,60,.6); } to { box-shadow: 0 0 0 7px rgba(10,122,60,0); } }
+  .bhead .find { margin-left: auto; width: min(220px, 100%); }
+
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding-block: 10px; border-bottom: 1px solid var(--rule); font: 13px var(--sans); }
+  .bar .p-selectbutton { flex-wrap: wrap; max-width: 100%; }
+  .stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: auto; color: var(--ink2); }
+  .stats b { font-weight: 700; }
+
+  /* index cards: flat panels separated by column rules, like the front page */
+  /* index cards wrap to the screen: 5 across on desktop, 3+2 on tablet, 2 per row on phones */
+  .idx { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 16px 20px; padding-block: 16px; border-bottom: 1px solid var(--rule); }
+  .card { display: flex; flex-direction: column; gap: 5px; font: 12px var(--sans); min-height: 132px; min-width: 0; padding-left: 10px; border-left: 1px solid var(--rule); }
+  @media (max-width: 560px) {
+    .idx { gap: 14px 12px; }
+    .card { padding-left: 8px; font-size: 11px; }
+    .card canvas { height: 48px; }
+    .card .val { font-size: 15px; }
+  }
+  .card canvas { display: block; width: 100%; height: 60px; }
+  .card .row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .card .row.sp { justify-content: space-between; }
+  .card .name { font: 700 13px var(--sans); }
+  .card .val { font: 700 17px var(--serif); }
+  .card .mut { color: var(--muted); }
+  .card .unit { color: var(--muted); margin-left: 3px; }
+
+  /* Table always fits the screen: columns are dropped by width in JS (cols), so
+     overflow-x is only a safety net, never the normal path. */
+  .tbl { margin: 16px auto 0; padding-inline: 12px; }
+  .scroll { overflow-x: auto; border-top: 2px solid var(--ink); }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; font: clamp(12px, .9vw, 13px) var(--sans); font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 4px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+  thead th { background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 700; text-align: center; text-transform: uppercase; letter-spacing: .4px; }
+  thead tr:last-child th { border-bottom-color: var(--ink); }
+  .grp { border-left: 1px solid var(--rule); }
+  tbody tr { cursor: pointer; }
+  tbody tr:nth-child(even) td { background: #fcfcfc; }
+  tbody tr:hover td { background: var(--row); }
+  tbody tr.sel td { background: var(--pick); }
+  td { font-weight: 500; }
+
+  /* symbol column pinned so it stays readable while scrolling 25 columns sideways */
+  .code { position: sticky; left: 0; z-index: 2; text-align: left; font-weight: 700; background: var(--bg); color: var(--ink); }
+  thead .code { z-index: 3; }
+
+  td.f-up { animation: flup .7s ease-out; }
+  td.f-down { animation: fldn .7s ease-out; }
+  @keyframes flup { from { background: rgba(10,122,60,.22); } to { background: transparent; } }
+  @keyframes fldn { from { background: rgba(196,22,28,.2); } to { background: transparent; } }
+
+  /* detail popup (p-dialog) */
+  .detail .p-dialog-content { padding-bottom: 20px; }
+  .dhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+  .dhead h2 { margin: 0; font: 700 28px var(--display); }
+  .dhead .cname { font: 14px var(--serif); color: var(--ink2); }
+  .dhead .p-tag.up { color: var(--up); } .dhead .p-tag.down { color: var(--down); } .dhead .p-tag.ceil { color: var(--ceil); } .dhead .p-tag.fl { color: var(--floor); }
+  .frame { position: relative; height: min(540px, 60vh); background: var(--soft);
+           background-image: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.7) 40%, transparent 60%);
+           background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+  .frame iframe { position: absolute; inset: 0; border: 0; width: 100%; height: 100%; opacity: 0; transition: opacity .25s; }
+  .frame iframe.ready { opacity: 1; }
+  .rel { margin-top: 18px; }
+  .rel .label { display: flex; align-items: center; gap: 8px; }
+  .rel ul { list-style: none; margin: 0; padding: 0; }
+  .rel li a { display: grid; grid-template-columns: 120px 1fr; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+  .rel li span { font: 12px var(--sans); color: var(--muted); }
+  .rel li b { font: 700 17px/1.3 var(--serif); }
+  .rel li a:hover b { color: var(--ink2); }
+
+  @media (max-width: 560px) {
+    .stats { margin-left: 0; }
+    .rel li a { grid-template-columns: 1fr; gap: 2px; }
+    .frame { height: 420px; }
+  }
+</style>
+</head>
+<body>
+<div id="app" v-cloak>
+  <site-header bare></site-header>
+  <main class="wrap">
+    <div class="bhead">
+      <h1>Bảng giá trực tuyến</h1>
+      <p-tag severity="secondary" rounded class="live"><span class="dot" :class="{on: ticking}"></span>Cập nhật {{ updated || '—' }}</p-tag>
+      <p-iconfield class="find">
+        <p-inputicon class="pi pi-search"></p-inputicon>
+        <p-inputtext v-model="search" placeholder="Tìm mã…" aria-label="Tìm mã chứng khoán" fluid size="small"></p-inputtext>
+        <p-inputicon v-if="search" class="pi pi-times clear" role="button" aria-label="Xoá" @click="search = ''"></p-inputicon>
+      </p-iconfield>
+    </div>
+    <div class="bar">
+      <p-selectbutton v-model="board" :options="boards" option-label="key" option-value="key" :allow-empty="false"
+                      size="small" aria-label="Nhóm cổ phiếu"></p-selectbutton>
+      <div class="stats">
+        <span class="up" v-tooltip.bottom="'Số mã tăng'"><b>▲ {{ stats.up }}</b> tăng</span>
+        <span class="ref" v-tooltip.bottom="'Đứng giá / chưa khớp'"><b>■ {{ stats.flat }}</b> đứng</span>
+        <span class="down" v-tooltip.bottom="'Số mã giảm'"><b>▼ {{ stats.down }}</b> giảm</span>
+        <span class="ceil">Trần {{ stats.ceil }}</span>
+        <span class="fl">Sàn {{ stats.floor }}</span>
+        <span>KL <b>{{ fmtVol(stats.vol) }}</b></span>
+        <span>GT <b>{{ (stats.val / 1e9).toFixed(1) }} tỷ</b></span>
+      </div>
+    </div>
+
+    <p-message v-if="error" severity="error" class="msg">{{ error }}</p-message>
+
+    <div class="idx">
+      <index-card v-for="i in indexes" :key="i" :id="i"></index-card>
+    </div>
+  </main>
+
+  <p-dialog v-model:visible="dlgOpen" modal dismissable-mask class="detail" :style="{ width: 'min(1000px, 96vw)' }"
+            :breakpoints="{ '640px': '100vw' }" :draggable="false">
+    <template #header>
+      <div class="dhead"><h2>{{ sel }}</h2><span class="cname">{{ selRow?.companyNameVi }}</span>
+        <p-tag v-if="selRow?.matchedPrice" :value="p(selRow.matchedPrice) + ' (' + chg(selRow) + ')'" :class="cls(selRow.matchedPrice, selRow)" severity="secondary"></p-tag></div>
+    </template>
+    <template v-if="sel">
+      <!-- VPS's own TradingView build: candles, volume and indicators for free.
+           :key forces a fresh frame per symbol instead of pushing browser history. -->
+      <div class="frame">
+        <iframe :key="sel" :src="chartUrl" :class="{ready: chartReady}" @load="chartReady = true" title="Biểu đồ kỹ thuật"></iframe>
+      </div>
+      <div class="rel">
+        <h2 class="label">Tin liên quan {{ sel }} <p-badge v-if="symNews?.length" :value="symNews.length" severity="contrast"></p-badge></h2>
+        <template v-if="symNews === null"><p-skeleton v-for="i in 3" :key="i" height="1.4rem" class="mt"></p-skeleton></template>
+        <p-message v-else-if="!symNews.length" severity="secondary" variant="simple">Chưa có tin nào nhắc tới {{ sel }} gần đây.</p-message>
+        <ul v-else>
+          <!-- API đã sắp mới nhất trước; phần còn lại xem ở trang tin theo mã. -->
+          <li v-for="a in symNews.slice(0, 5)" :key="a.url">
+            <a :href="`article.html?p=${encodeURIComponent(a.url)}&cat=${a.cat}`" target="_blank">
+              <span>{{ ago(a.time) }}</span><b>{{ a.title }}</b></a>
+          </li>
+        </ul>
+        <p-button v-if="symNews?.length > 5" as="a" :href="`section.html?sym=${sel}`" target="_blank" class="mt"
+                  :label="`Xem tất cả ${symNews.length} tin về ${sel}`" icon="pi pi-arrow-right" icon-pos="right" size="small" outlined></p-button>
+      </div>
+    </template>
+  </p-dialog>
+
+  <div class="tbl"><div class="scroll" ref="scroller">
+    <table>
+      <thead>
+        <tr>
+          <th class="code" rowspan="2">Mã CK</th>
+          <template v-if="cols.limits"><th rowspan="2">Trần</th><th rowspan="2">Sàn</th></template>
+          <th rowspan="2">TC</th>
+          <th v-if="cols.depth" class="grp" :colspan="cols.depth * 2">Bên mua</th>
+          <th class="grp" colspan="3">Khớp lệnh</th>
+          <th v-if="cols.depth" class="grp" :colspan="cols.depth * 2">Bên bán</th>
+          <th class="grp" rowspan="2">Tổng KL</th>
+          <template v-if="cols.hilo"><th rowspan="2">Cao</th><th rowspan="2">Thấp</th></template>
+          <template v-if="cols.foreign"><th rowspan="2">TB</th><th class="grp" colspan="3">ĐTNN</th></template>
+        </tr>
+        <tr>
+          <template v-for="(i, k) in bids" :key="'b' + i"><th :class="{grp: !k}">Giá {{ i }}</th><th>KL {{ i }}</th></template>
+          <th class="grp">Giá</th><th>KL</th><th>+/-</th>
+          <template v-for="(i, k) in asks" :key="'a' + i"><th :class="{grp: !k}">Giá {{ i }}</th><th>KL {{ i }}</th></template>
+          <template v-if="cols.foreign"><th class="grp">Mua</th><th>Bán</th><th>Room</th></template>
+        </tr>
+      </thead>
+      <tbody>
+        <template v-if="!rows.length && !error">
+          <tr v-for="i in 12" :key="'sk' + i"><td colspan="30"><p-skeleton height="1.1rem"></p-skeleton></td></tr>
+        </template>
+        <tr v-for="r in shown" :key="r.stockSymbol" :class="{sel: sel === r.stockSymbol}" @click="open(r)">
+          <td class="code">{{ r.stockSymbol }}</td>
+          <template v-if="cols.limits">
+            <td class="ceil">{{ p(r.ceiling) }}</td>
+            <td class="fl">{{ p(r.floor) }}</td>
+          </template>
+          <td class="ref">{{ p(r.refPrice) }}</td>
+
+          <template v-for="(i, k) in bids" :key="'b' + i">
+            <td :class="[{grp: !k}, cls(r[`best${i}Bid`], r)]">{{ p(r[`best${i}Bid`]) }}</td>
+            <td :class="cls(r[`best${i}Bid`], r)">{{ fmtVol(r[`best${i}BidVol`]) }}</td>
+          </template>
+
+          <td class="grp" :class="[cls(r.matchedPrice, r), flash[r.stockSymbol]]">{{ p(r.matchedPrice) }}</td>
+          <td :class="[cls(r.matchedPrice, r), flash[r.stockSymbol]]">{{ fmtVol(r.matchedVolume) }}</td>
+          <td :class="cls(r.matchedPrice, r)">{{ chg(r) }}</td>
+
+          <template v-for="(i, k) in asks" :key="'a' + i">
+            <td :class="[{grp: !k}, cls(r[`best${i}Offer`], r)]">{{ p(r[`best${i}Offer`]) }}</td>
+            <td :class="cls(r[`best${i}Offer`], r)">{{ fmtVol(r[`best${i}OfferVol`]) }}</td>
+          </template>
+
+          <td class="grp">{{ fmtVol(r.nmTotalTradedQty) }}</td>
+          <template v-if="cols.hilo">
+            <td :class="cls(r.highest, r)">{{ p(r.highest) }}</td>
+            <td :class="cls(r.lowest, r)">{{ p(r.lowest) }}</td>
+          </template>
+          <template v-if="cols.foreign">
+            <td :class="cls(r.avgPrice, r)">{{ p(r.avgPrice) }}</td>
+            <td class="grp dim">{{ short(r.buyForeignQtty) }}</td>
+            <td class="dim">{{ short(r.sellForeignQtty) }}</td>
+            <td class="dim">{{ short(r.remainForeignQtty) }}</td>
+          </template>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+  <site-footer></site-footer>
+</div>
+
+<script src="https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/primevue@4.5.5/umd/primevue.min.js"></script>
+<script src="https://unpkg.com/@primeuix/themes@1.2.5/umd/aura.js"></script>
+<script src="ui.js"></script>
+<script src="board.js"></script>
+</body>
+</html>
