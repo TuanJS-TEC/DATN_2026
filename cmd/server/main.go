@@ -58,6 +58,8 @@ func main() {
 	addr := "0.0.0.0:8765" // ponytail: ADDR override only so this can run beside server.py
 	if v := os.Getenv("ADDR"); v != "" {
 		addr = v
+	} else if p := os.Getenv("PORT"); p != "" { // Render/Heroku set PORT, not ADDR
+		addr = "0.0.0.0:" + p
 	}
 	// Header timeout stops slow clients pinning connections; no WriteTimeout,
 	// since ?sym= news fans out to 7 categories and can legitimately take ~20s.

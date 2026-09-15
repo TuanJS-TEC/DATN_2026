@@ -12,6 +12,7 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=build /server ./server
 COPY web ./web
-ENV ADDR=0.0.0.0:8080
+# Render/Heroku override PORT at `docker run` time; Fly reads fly.toml's internal_port instead.
+ENV PORT=8080
 EXPOSE 8080
 ENTRYPOINT ["./server"]
