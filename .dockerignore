@@ -1,0 +1,7 @@
+.venv
+etl
+db
+__pycache__
+*.log
+.git
+server

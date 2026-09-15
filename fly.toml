@@ -1,0 +1,17 @@
+# Đổi 'app' thành tên bạn chọn khi chạy `fly launch` (fly.io yêu cầu tên duy nhất toàn cầu).
+app = "datn-2026"
+primary_region = "sin"  # Singapore: gần VN nhất trong các region free tier
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true   # dừng máy khi không có request, tiết kiệm giờ free tier
+  auto_start_machines = true  # request tới thì tự bật lại (chờ vài giây lần đầu)
+  min_machines_running = 0
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
