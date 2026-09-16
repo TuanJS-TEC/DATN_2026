@@ -20,6 +20,15 @@ import (
 
 const web = "web"
 
+// revalidate makes the browser check with us before reusing a cached page or
+// script. Without it net/http sends no Cache-Control at all, browsers fall back
+// to heuristic caching, and a deploy can leave a stale board.js calling API
+// routes that no longer exist. "no-cache" still allows a 304 off the ETag —
+// it forces the check, not a re-download.
+func revalidate(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache")
+}
+
 func main() {
 	// Wrong working dir would otherwise serve a site of 404s without a word.
 	if _, err := os.Stat(web + "/index.html"); err != nil {
@@ -51,10 +60,15 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
+		revalidate(w)
 		http.ServeContent(w, r, "index.html", st.ModTime(), f)
 	})
 	// Only web/ is public; serving "." used to expose the Go source and binary.
-	mux.Handle("/", http.FileServer(http.Dir(web)))
+	fs := http.FileServer(http.Dir(web))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		revalidate(w)
+		fs.ServeHTTP(w, r)
+	}))
 
 	addr := "0.0.0.0:8765" // ponytail: ADDR override only so this can run beside server.py
 	if v := os.Getenv("ADDR"); v != "" {
