@@ -9,6 +9,33 @@ const bil = (v) => {
   return t >= 1000 ? n2(t / 1000) + 'N' : n2(t);
 };
 
+// Bảng giá đọc thẳng từ CafeF: API của họ cho mọi origin, nên trang không phụ
+// thuộc vào chỗ đặt server. SSI — nguồn cũ — trả 403 với mọi IP datacenter.
+const CAFEF = 'https://banggia.cafef.vn/stockhandler.ashx?center=';
+
+// CafeF gửi giá theo nghìn đồng ("20.95"); template chia lại 1000 khi hiển thị.
+const k1 = (v) => (v || 0) * 1000;
+
+// Khóa một chữ của CafeF -> tên field board.html đang render.
+const mapRow = (r) => ({
+  stockSymbol: r.a,
+  refPrice: k1(r.b), ceiling: k1(r.c), floor: k1(r.d),
+  matchedPrice: k1(r.l), matchedVolume: r.m, priceChange: k1(r.k),
+  nmTotalTradedQty: r.n,
+  // CafeF không có giá trị giao dịch từng mã. KL × giá khớp đủ chính xác cho
+  // dòng tổng, chỗ duy nhất dùng tới nó.
+  nmTotalTradedValue: (r.n || 0) * k1(r.l),
+  highest: k1(r.v), lowest: k1(r.w),
+  best1Bid: k1(r.e), best1BidVol: r.f,
+  best2Bid: k1(r.g), best2BidVol: r.h,
+  best3Bid: k1(r.i), best3BidVol: r.j,
+  // Bên bán xếp từ xa nhất về: s/t mới là giá bán tốt nhất, o/p là mức 3.
+  best1Offer: k1(r.s), best1OfferVol: r.t,
+  best2Offer: k1(r.q), best2OfferVol: r.r,
+  best3Offer: k1(r.o), best3OfferVol: r.p,
+  buyForeignQtty: r.x, sellForeignQtty: r.y, remainForeignQtty: r.z,
+});
+
 const IndexCard = {
   props: ['id'],
   template: `
@@ -29,7 +56,6 @@ const IndexCard = {
         <span class="ref">{{ s.nochanges || 0 }} Mid</span>
         <span><span class="down">{{ s.declines || 0 }} Down</span>
           <span class="fl">({{ s.floor || 0 }})</span></span>
-        <span class="mut">GDTT {{ bil(s.totalValuePT) }}</span>
       </div>
     </div>`,
   setup(props) {
@@ -104,6 +130,9 @@ createPage({
     const indexes = ['VNINDEX', 'VN30', 'HNX', 'HNX30', 'UPCOM'];
 
     const board = ref('VN30');
+    // Feed CafeF nào và rổ gồm mã nào: lấy từ /api/groups (hằng số trong Go,
+    // không gọi upstream) để danh sách VN30/VN100/HNX30 chỉ nằm ở một chỗ.
+    const groups = ref({});
 
     const symNews = ref(null);   // null = đang tải
     const rows = ref([]);
@@ -188,10 +217,16 @@ createPage({
 
     const loadBoard = async () => {
       try {
-        const res = await fetch(`/api/board?group=${board.value}`);
+        const g = groups.value[board.value];
+        if (!g) return;  // /api/groups chưa về, lần poll sau thử lại
+        const res = await fetch(CAFEF + g.center, { cache: 'no-store' });
         const j = await res.json();
         if (j.error) throw new Error(j.error);
-        const data = (j.data || []).sort((a, b) => a.stockSymbol.localeCompare(b.stockSymbol));
+        const keep = g.syms && new Set(g.syms);
+        const data = (Array.isArray(j) ? j : [])
+          .filter(r => !keep || keep.has(r.a))
+          .map(mapRow)
+          .sort((a, b) => a.stockSymbol.localeCompare(b.stockSymbol));
         for (const r of data) {
           const was = prev.get(r.stockSymbol);
           if (was !== undefined && r.matchedPrice && was !== r.matchedPrice) {
@@ -236,7 +271,14 @@ createPage({
       loadBoard(); start();
     });
 
-    onMounted(() => { loadBoard(); start(); window.addEventListener('resize', onResize); });
+    onMounted(async () => {
+      try {
+        groups.value = await (await fetch('/api/groups')).json();
+      } catch (e) {
+        error.value = 'Không tải được danh sách sàn: ' + e.message;
+      }
+      loadBoard(); start(); window.addEventListener('resize', onResize);
+    });
     onUnmounted(() => { clearInterval(timer); window.removeEventListener('resize', onResize); });
 
     return { cols, scroller, bids, asks, short, boards, board, indexes, rows, search, error, updated, ticking, sel, selRow, flash, dlgOpen,

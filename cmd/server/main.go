@@ -27,7 +27,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/board", market.Board)
+	// No /api/board: board.js reads CafeF directly, see internal/market.
+	mux.HandleFunc("/api/groups", market.Groups)
 	mux.HandleFunc("/api/index", market.Index)
 	mux.HandleFunc("/api/news", news.List)
 	mux.HandleFunc("/api/article", news.Article)
