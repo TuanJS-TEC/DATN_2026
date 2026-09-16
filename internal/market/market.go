@@ -46,7 +46,12 @@ func Board(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, 400, "unknown group: "+group)
 		return
 	}
-	b, err := httpx.Fetch(ssi + path)
+	// board.js polls every 2-10s per tab; without this every tab was its own
+	// upstream hit, which is what trips SSI's rate rules. Also gives the stale
+	// fallback the news pages already have.
+	b, err := httpx.Cached("board:"+group, 2*time.Second, func() ([]byte, error) {
+		return httpx.Fetch(ssi + path)
+	})
 	if err != nil {
 		httpx.Fail(w, 502, err.Error())
 		return
@@ -63,40 +68,42 @@ func Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	raw, err := httpx.Fetch(ssi + "exchange-index/" + ids[0])
+	// Five cards poll this every 5s per tab — see the note in Board.
+	out, err := httpx.Cached("index:"+key, 5*time.Second, func() ([]byte, error) {
+		raw, err := httpx.Fetch(ssi + "exchange-index/" + ids[0])
+		if err != nil {
+			return nil, err
+		}
+		var snapWrap struct {
+			Data json.RawMessage `json:"data"`
+		}
+		json.Unmarshal(raw, &snapWrap)
+		if len(snapWrap.Data) == 0 {
+			snapWrap.Data = json.RawMessage("{}")
+		}
+
+		// 7 days back so a holiday or weekend still shows the last real session.
+		to := time.Now().Unix()
+		raw, err = httpx.Fetch(fmt.Sprintf("%s?from=%d&to=%d&symbol=%s&resolution=1", entrade, to-7*86400, to, ids[1]))
+		if err != nil {
+			return nil, err
+		}
+		var ch struct {
+			T []int64   `json:"t"`
+			C []float64 `json:"c"`
+		}
+		if err := json.Unmarshal(raw, &ch); err != nil {
+			return nil, err
+		}
+		return json.Marshal(struct {
+			Snap json.RawMessage `json:"snap"`
+			C    []float64       `json:"c"`
+		}{snapWrap.Data, today(ch.T, ch.C)})
+	})
 	if err != nil {
 		httpx.Fail(w, 502, err.Error())
 		return
 	}
-	var snapWrap struct {
-		Data json.RawMessage `json:"data"`
-	}
-	json.Unmarshal(raw, &snapWrap)
-	if len(snapWrap.Data) == 0 {
-		snapWrap.Data = json.RawMessage("{}")
-	}
-
-	// 7 days back so a holiday or weekend still shows the last real session.
-	to := time.Now().Unix()
-	raw, err = httpx.Fetch(fmt.Sprintf("%s?from=%d&to=%d&symbol=%s&resolution=1", entrade, to-7*86400, to, ids[1]))
-	if err != nil {
-		httpx.Fail(w, 502, err.Error())
-		return
-	}
-	var ch struct {
-		T []int64   `json:"t"`
-		C []float64 `json:"c"`
-	}
-	if err := json.Unmarshal(raw, &ch); err != nil {
-		httpx.Fail(w, 502, err.Error())
-		return
-	}
-	cs := today(ch.T, ch.C)
-
-	out, _ := json.Marshal(struct {
-		Snap json.RawMessage `json:"snap"`
-		C    []float64       `json:"c"`
-	}{snapWrap.Data, cs})
 	httpx.Send(w, 200, out)
 }
 

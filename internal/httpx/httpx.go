@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,18 +15,33 @@ import (
 
 var client = &http.Client{Timeout: 10 * time.Second}
 
-// Fetch GETs an upstream URL. SSI, entrade and CafeF all reject a default
-// Go User-Agent, hence the browser one.
+// Fetch GETs an upstream URL. SSI, entrade and CafeF all reject a default Go
+// User-Agent. A bare "Mozilla/5.0" is also enough for SSI's Cloudflare to 403
+// us from a datacenter IP (works from a VN home IP, fails on Render), so send
+// the header set a real Chrome sends — UA, client hints, language.
 func Fetch(url string) ([]byte, error) {
 	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Sec-Ch-Ua", `"Google Chrome";v="131", "Chromium";v="131", "Not=A?Brand";v="24"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	// SSI's API host only answers for its own front-end's origin.
+	if strings.Contains(url, "ssi.com.vn") {
+		req.Header.Set("Origin", "https://iboard.ssi.com.vn")
+		req.Header.Set("Referer", "https://iboard.ssi.com.vn/")
+	}
 	r, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Body.Close()
 	if r.StatusCode != 200 {
+		// The body says which rule rejected us (bot score vs rate limit vs geo);
+		// logged, not returned, so a Cloudflare page never reaches the browser.
+		snippet, _ := io.ReadAll(io.LimitReader(r.Body, 300))
+		log.Printf("upstream %d %s: %s", r.StatusCode, url, snippet)
 		return nil, fmt.Errorf("upstream %d", r.StatusCode)
 	}
 	return io.ReadAll(r.Body)
